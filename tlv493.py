@@ -1,10 +1,14 @@
-from smbus2 import SMBus
 import struct
-import paho.mqtt.client as mqtt
 import time
+from typing import Tuple
+
+from smbus import SMBus
+
 
 class TLV493:
-    TLV493D_DEFAULT_ADDRESS = 0x5E
+    """A copy-paste from https://github.com/adafruit/Adafruit_CircuitPython_TLV493D/blob/main/adafruit_tlv493d.py
+    adopted to generic python (instead of adafruit's internals)
+    """
     read_masks = {
         "BX1": (0, 0xFF, 0),
         "BX2": (4, 0xF0, 4),
@@ -36,24 +40,45 @@ class TLV493:
         "RES3": (3, 0x1F, 0),
     }
 
-    def __init__(self,bus,addr = TLV493D_DEFAULT_ADDRESS, addr_reg: int = 0):
+    def __init__(self, bus, addr = 0x5e, addr_reg: int = 0):
         self.read_buffer = [0] * 10
         self.write_buffer = [0] * 4
         self.bus = bus
         self.addr = addr
         self.addr_reg = addr_reg
-        self.init_sens()
 
-    def _unpack_and_scale(self,top: int, bottom: int) -> float:
-        binval = struct.unpack_from(">h", bytearray([top, bottom]))[0]
-        binval = binval >> 4
-        return binval * 98.0
-    
+        # read in data from sensor, including data that must be set on a write
+        self._setup_write_buffer()
+
+        # write correct i2c address
+        self._set_write_key("ADDR", addr_reg)
+
+        # setup MASTERCONTROLLEDMODE which takes a measurement for every read
+        self._set_write_key("PARITY", 1)
+        self._set_write_key("FAST", 1)
+        self._set_write_key("LOWPOWER", 1)
+        self._write_i2c()
+
+    def _read_i2c(self):
+        self.read_buffer = self.bus.read_i2c_block_data(self.addr, 0, len(self.read_buffer))
+
+    def _write_i2c(self) -> None:
+        """@Magistrdev's heuristic
+        """
+        self.bus.write_i2c_block_data(self.addr, 0, self.write_buffer[:-1])
+        self.bus.write_i2c_block_data(self.addr, 0, self.write_buffer[-1:])
+
     def _setup_write_buffer(self) -> None:
-            self.read_i2c()
-            for key in ["RES1", "RES2", "RES3"]:
-                write_value = self._get_read_key(key)
-                self._set_write_key(key, write_value)
+        self._read_i2c()
+        for key in ["RES1", "RES2", "RES3"]:
+            write_value = self._get_read_key(key)
+            self._set_write_key(key, write_value)
+
+    def _get_read_key(self, key: str) -> int:
+        read_byte_num, read_mask, read_shift = self.read_masks[key]
+        raw_read_value = self.read_buffer[read_byte_num]
+        write_value = (raw_read_value & read_mask) >> read_shift
+        return write_value
 
     def _set_write_key(self, key: str, value: int) -> None:
         write_byte_num, write_mask, write_shift = self.write_masks[key]
@@ -62,34 +87,12 @@ class TLV493:
         current_write_byte |= value << write_shift
         self.write_buffer[write_byte_num] = current_write_byte
 
-    def _get_read_key(self, key: str) -> int:
-        read_byte_num, read_mask, read_shift = self.read_masks[key]
-        raw_read_value = self.read_buffer[read_byte_num]
-        write_value = (raw_read_value & read_mask) >> read_shift
-        return write_value
-
-    def read_i2c(self):
-        try:
-            self.read_buffer = self.bus.read_i2c_block_data(self.addr,0,10)
-        except:
-            time.sleep(2) # какая ошибка?
-            self.init_sens()
-            pass
-    # def write_i2c(self):
-    #     try:
-    #         self.bus.write_i2c_block_data(self.addr,0x00,self.write_buffer[:-1])
-    #     except:
-    #         pass
-    def _get_read_key(self, key: str) -> int:
-            read_byte_num, read_mask, read_shift = self.read_masks[key]
-            raw_read_value = self.read_buffer[read_byte_num]
-            write_value = (raw_read_value & read_mask) >> read_shift
-            return write_value
-    def magnetic(self):
+    @property
+    def magnetic(self) -> Tuple[float, float, float]:
         """The processed magnetometer sensor values.
         A 3-tuple of X, Y, Z axis values in microteslas that are signed floats.
         """
-        self.read_i2c()  # update read registers
+        self._read_i2c()  # update read registers
         x_top = self._get_read_key("BX1")
         x_bot = (self._get_read_key("BX2") << 4) & 0xFF
         y_top = self._get_read_key("BY1")
@@ -102,46 +105,19 @@ class TLV493:
             self._unpack_and_scale(y_top, y_bot),
             self._unpack_and_scale(z_top, z_bot),
         )
-    def init_sens(self):
-        self._setup_write_buffer()
-        self._set_write_key("ADDR", self.addr_reg)
-        self._set_write_key("PARITY", 1)
-        self._set_write_key("FAST", 1)
-        self._set_write_key("LOWPOWER", 1)
-        # self.write_i2c()
-        try:
-            self.bus.write_i2c_block_data(self.addr,0x00,self.write_buffer[:-1])
-            self.bus.write_i2c_block_data(self.addr, 0x00, [5]) # падает на 4 регистре; эксперименты
-        except:
-            pass
 
-
-MQTT_BROKER = "localhost"  # Для работы на самом WB
-MQTT_TOPIC = "/devices/tlv493d/controls/temperature"
-MQTT_CLIENT_ID = "my_python_script"
-
-# Топики для параметров
-TOPICS = {
-    "x": "/devices/tlv493d/controls/X",
-    "y": "/devices/tlv493d/controls/Y",
-    "z": "/devices/tlv493d/controls/Z",
-    "temperature": "/devices/tlv493d/controls/Temperature"
-}
-
-client = mqtt.Client(MQTT_CLIENT_ID)
-client.connect(MQTT_BROKER, 1883, 60)
+    @staticmethod
+    def _unpack_and_scale(top: int, bottom: int) -> float:
+        binval = struct.unpack_from(">h", bytearray([top, bottom]))[0]
+        binval = binval >> 4
+        return binval * 98.0
 
     
 if __name__ == "__main__":
     bus = SMBus(3)
-    sens = TLV493(bus,TLV493.TLV493D_DEFAULT_ADDRESS)
-    # sens = TLV493(bus,0x35)
-    fc = 0
+    sens = TLV493(bus)
     while True:
-        x,y,z = sens.magnetic()
+        x,y,z = sens.magnetic
         temperature = -255
         print("X - %6.0f µT\t Y - %6.0f µT\t Z - %6.0f µT\t temp - %0.01f\t "%(x,y,z,0))
-        for key, topic in TOPICS.items():
-                    value = locals()[key]
-                    client.publish(topic, value)
         time.sleep(0.5)
