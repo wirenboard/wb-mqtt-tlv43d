@@ -1,8 +1,14 @@
+import json
+import os
 import struct
 import time
+from pathlib import Path
 from typing import Tuple
 
 from smbus import SMBus
+from wb_common.mqtt_client import MQTTClient
+
+MEASUREMENTS_FILE = Path("/var/run/shm/wb-mqtt-tlv493/measurements")
 
 
 class TLV493:
@@ -112,12 +118,76 @@ class TLV493:
         binval = binval >> 4
         return binval * 98.0
 
+
+class VirtualDevice:
+
+    DEVICE_META = {
+        "driver": "wb-mqtt-tlv493",
+        "title": {
+            "en": "Magnetic field sensor",
+            "ru": "Датчик напряженности магнитного поля"
+        }
+    }
+
+    CONTROL_META = {
+        "type": "value",
+        "order": 10,
+        "readonly": True,
+        "title": {
+            "en": "Magnetic field strength",
+            "ru": "Напряженность поля",
+        }
+    }
+
+    def __init__(self, mqtt_client, bus_number):
+        self.base_topic = f"/devices/tlv493_{bus_number}"
+        self.control_topic = f"/devices/tlv493_{bus_number}/controls/field_strength"
+        self.mqtt_client = mqtt_client
+        self.create()
+
+    def _publish_meta(self, device_meta, control_meta):
+        self.mqtt_client.publish(f"{self.base_topic}/meta", device_meta, retain=True)
+        self.mqtt_client.publish(f"{self.control_topic}/meta", control_meta, retain=True)
+
+    def create(self):
+        self._publish_meta(json.dumps(self.DEVICE_META), json.dumps(self.CONTROL_META))
+        self.publish_error()
+
+    def delete(self):
+        self._publish_meta(None, None)
+
+    def publish_value(self, val):
+        self.mqtt_client.publish(self.control_topic, str(val), retain=True)
+
+    def publish_error(self, val="r"):
+        val = "r" if val else ""
+        self.mqtt_client.publish(f"{self.control_topic}/meta/error", val, retain=True)
+
     
 if __name__ == "__main__":
-    bus = SMBus(3)
+    bus_num = 3
+
+    mqtt_client = MQTTClient("wb-mqtt-tlv493")
+    mqtt_client.start()
+
+    virtual_device = VirtualDevice(mqtt_client, bus_num)
+
+    bus = SMBus(bus_num)
     sens = TLV493(bus)
-    while True:
-        x,y,z = sens.magnetic
-        temperature = -255
-        print("X - %6.0f µT\t Y - %6.0f µT\t Z - %6.0f µT\t temp - %0.01f\t "%(x,y,z,0))
-        time.sleep(0.5)
+    virtual_device.publish_error(None)
+
+    try:
+        while True:
+            temperature = -255
+            x,y,z = sens.magnetic
+            result = "%.2f" % (abs(x) + abs(y) + abs(z))
+            print("X - %6.0f µT\t Y - %6.0f µT\t Z - %6.0f µT\t temp - %0.01f overall: %s\t "%(x,y,z,0,result))
+            virtual_device.publish_value(result)
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        virtual_device.publish_error()
+    finally:
+        virtual_device.delete()
+        mqtt_client.stop()
