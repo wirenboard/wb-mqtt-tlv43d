@@ -1,5 +1,9 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import json
 import logging
+import signal
 import struct
 import sys
 import time
@@ -164,7 +168,7 @@ class VirtualDevice:
         self.publish_error()
 
     def delete(self):
-        self._publish_meta(None, None)
+        self._publish_meta("", "")
 
     def publish_value(self, val):
         self.mqtt_client.publish(self.control_topic, str(val), retain=True)
@@ -174,64 +178,79 @@ class VirtualDevice:
         self.mqtt_client.publish(f"{self.control_topic}/meta/error", val, retain=True)
 
 
-def search_i2c_device(bus):
-    for device in range(128):
+class TLV493Driver:
+
+    def __init__(self, config_fname="/etc/wb-mqtt-tlv493.conf"):
+        ec = self.update_config(config_fname)
+        if ec != EXIT_SUCCESS:
+            sys.exit(ec)
+
+        self.mqtt_client = MQTTClient(CONFIG["driver_name"])
+        self.mqtt_client.start()
+
+        self.bus_num = CONFIG.get("bus_num", None)
+        if self.bus_num is None:
+            logging.warning("Bus number is not specified")
+            sys.exit(EXIT_NOTCONFIGURED)
+        self.bus = SMBus(self.bus_num)
+
+        self.running = True
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, self.handle_stop)
+
+    def handle_stop(self, *args, **kwargs):
+        self.running = False
+
+    def search_i2c_device(self):
+        for device in range(128):
+            try:
+                self.bus.read_i2c_block_data(device, 0, 10)
+                logging.info("Found alive device at %x", device)
+                return device
+            except Exception:
+                pass
+        raise RuntimeError("No devices found")
+
+    def run(self):
+        ec = EXIT_SUCCESS
         try:
-            bus.read_i2c_block_data(device, 0, 10)
-            logging.info("Found alive device at %x", device)
-            return device
+            virtual_device = VirtualDevice(self.mqtt_client, self.bus_num)
+            addr = self.search_i2c_device()
+            sens = TLV493(self.bus, addr)
+            virtual_device.publish_error(None)
+            logging.info("Start polling device via i2c w %.2fs period", CONFIG["poll_interval_s"])
+            while self.running:
+                x, y, z = sens.magnetic
+                result_ut = max(map(abs, [x, y, z]))
+                result = "%.2f" % (result_ut / 130000.0 * 100.0)
+                virtual_device.publish_value(result)
+                time.sleep(CONFIG["poll_interval_s"])
         except Exception:
-            pass
-    raise RuntimeError("No devices found")
+            logging.exception("Unhandled exception:")
+            ec = EXIT_FAILURE
+            virtual_device.publish_error()
+        finally:
+            virtual_device.delete()
+            self.mqtt_client.stop()
+            sys.exit(ec)
 
-
-def update_config(config_fname):
-    try:
-        with open(config_fname, encoding="utf-8") as conffile:
-            config_dict = literal_eval(conffile.read())
-            CONFIG.update(config_dict)
-            return EXIT_SUCCESS
-    except IOError:
-        logging.info("No config file at %s found! Treating service as not running", config_fname)
-        return EXIT_NOTRUNNING
-    except (SyntaxError, ValueError):
-        logging.exception("Error in config file %s", config_fname)
-        return EXIT_NOTCONFIGURED
+    @staticmethod
+    def update_config(config_fname):
+        try:
+            with open(config_fname, encoding="utf-8") as conffile:
+                config_dict = literal_eval(conffile.read())
+                CONFIG.update(config_dict)
+                return EXIT_SUCCESS
+        except IOError:
+            logging.info("No config file at %s found! Treating service as not running", config_fname)
+            return EXIT_NOTRUNNING
+        except (SyntaxError, ValueError):
+            logging.exception("Error in config file %s", config_fname)
+            return EXIT_NOTCONFIGURED
 
 
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s %(message)s", level=logging.DEBUG)
 
-    ec = update_config("/etc/wb-mqtt-tlv493.conf")
-    if ec != EXIT_SUCCESS:
-        sys.exit(ec)
-
-    mqtt_client = MQTTClient(CONFIG["driver_name"])
-    mqtt_client.start()
-
-    bus_num = CONFIG.get("bus_num", None)
-    if bus_num is None:
-        logging.warning("Bus number is not specified")
-        sys.exit(EXIT_NOTCONFIGURED)
-    bus = SMBus(bus_num)
-
-    try:
-        virtual_device = VirtualDevice(mqtt_client, bus_num)
-        addr = search_i2c_device(bus)
-        sens = TLV493(bus, addr)
-        virtual_device.publish_error(None)
-        while True:
-            x,y,z = sens.magnetic
-            result_ut = max(map(abs, [x, y, z]))
-            result = "%.2f" % (result_ut / 130000.0 * 100.0)
-            virtual_device.publish_value(result)
-            time.sleep(CONFIG["poll_interval_s"])
-    except Exception as e:
-        if not isinstance(e, SystemExit):
-            logging.exception("Unhandled exception:")
-            ec = EXIT_FAILURE
-        virtual_device.publish_error()
-    finally:
-        virtual_device.delete()
-        mqtt_client.stop()
-        sys.exit(ec)
+    TLV493Driver().run()
