@@ -1,14 +1,23 @@
 import json
-import os
+import logging
 import struct
+import sys
 import time
-from pathlib import Path
+from ast import literal_eval
 from typing import Tuple
 
 from smbus import SMBus
 from wb_common.mqtt_client import MQTTClient
 
-MEASUREMENTS_FILE = Path("/var/run/shm/wb-mqtt-tlv493/measurements")
+CONFIG = {
+    "poll_interval_s": 0.5,
+    "driver_name": "wb-mqtt-tlv493"
+}
+
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+EXIT_NOTCONFIGURED = 6
+EXIT_NOTRUNNING = 7
 
 
 class TLV493:
@@ -71,8 +80,9 @@ class TLV493:
     def _write_i2c(self) -> None:
         """@Magistrdev's heuristic
         """
+        val = self.write_buffer[1]
         self.bus.write_i2c_block_data(self.addr, 0, self.write_buffer[:-1])
-        self.bus.write_i2c_block_data(self.addr, 0, self.write_buffer[-1:])
+        self.bus.write_i2c_block_data(self.addr, 0, [val])
 
     def _setup_write_buffer(self) -> None:
         self._read_i2c()
@@ -122,7 +132,7 @@ class TLV493:
 class VirtualDevice:
 
     DEVICE_META = {
-        "driver": "wb-mqtt-tlv493",
+        "driver": CONFIG["driver_name"],
         "title": {
             "en": "Magnetic field sensor",
             "ru": "Датчик напряженности магнитного поля"
@@ -163,31 +173,65 @@ class VirtualDevice:
         val = "r" if val else ""
         self.mqtt_client.publish(f"{self.control_topic}/meta/error", val, retain=True)
 
-    
-if __name__ == "__main__":
-    bus_num = 3
 
-    mqtt_client = MQTTClient("wb-mqtt-tlv493")
+def search_i2c_device(bus):
+    for device in range(128):
+        try:
+            bus.read_i2c_block_data(device, 0, 10)
+            logging.info("Found alive device at %x", device)
+            return device
+        except Exception:
+            pass
+    raise RuntimeError("No devices found")
+
+
+def update_config(config_fname):
+    try:
+        with open(config_fname, encoding="utf-8") as conffile:
+            config_dict = literal_eval(conffile.read())
+            CONFIG.update(config_dict)
+            return EXIT_SUCCESS
+    except IOError:
+        logging.info("No config file at %s found! Treating service as not running", config_fname)
+        return EXIT_NOTRUNNING
+    except (SyntaxError, ValueError):
+        logging.exception("Error in config file %s", config_fname)
+        return EXIT_NOTCONFIGURED
+
+
+if __name__ == "__main__":
+    logging.basicConfig(format="%(asctime)s %(message)s", level=logging.DEBUG)
+
+    ec = update_config("/etc/wb-mqtt-tlv493.conf")
+    if ec != EXIT_SUCCESS:
+        sys.exit(ec)
+
+    mqtt_client = MQTTClient(CONFIG["driver_name"])
     mqtt_client.start()
 
-    virtual_device = VirtualDevice(mqtt_client, bus_num)
-
+    bus_num = CONFIG.get("bus_num", None)
+    if bus_num is None:
+        logging.warning("Bus number is not specified")
+        sys.exit(EXIT_NOTCONFIGURED)
     bus = SMBus(bus_num)
-    sens = TLV493(bus)
-    virtual_device.publish_error(None)
 
     try:
+        virtual_device = VirtualDevice(mqtt_client, bus_num)
+        addr = search_i2c_device(bus)
+        sens = TLV493(bus, addr)
+        virtual_device.publish_error(None)
         while True:
-            temperature = -255
             x,y,z = sens.magnetic
-            result = "%.2f" % (abs(x) + abs(y) + abs(z))
-            print("X - %6.0f µT\t Y - %6.0f µT\t Z - %6.0f µT\t temp - %0.01f overall: %s\t "%(x,y,z,0,result))
+            result_ut = max(map(abs, [x, y, z]))
+            result = "%.2f" % (result_ut / 130000.0 * 100.0)
             virtual_device.publish_value(result)
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
-    except Exception:
+            time.sleep(CONFIG["poll_interval_s"])
+    except Exception as e:
+        if not isinstance(e, SystemExit):
+            logging.exception("Unhandled exception:")
+            ec = EXIT_FAILURE
         virtual_device.publish_error()
     finally:
         virtual_device.delete()
         mqtt_client.stop()
+        sys.exit(ec)
