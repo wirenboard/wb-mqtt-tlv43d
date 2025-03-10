@@ -148,8 +148,8 @@ class VirtualDevice:
         "order": 10,
         "readonly": True,
         "title": {
-            "en": "Magnetic field strength",
-            "ru": "Напряженность поля",
+            "en": "Magnetic field strength %",
+            "ru": "Напряженность поля %",
         }
     }
 
@@ -203,6 +203,9 @@ class TLV493Driver:
         self.running = False
 
     def search_i2c_device(self):
+        """
+        TLV493 has different i2c addr, depending on SDA voltage => we have only 1 device on bus
+        """
         for device in range(128):
             try:
                 self.bus.read_i2c_block_data(device, 0, 10)
