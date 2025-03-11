@@ -155,7 +155,7 @@ class VirtualDevice:
 
     def __init__(self, mqtt_client, bus_number):
         self.base_topic = f"/devices/tlv493_{bus_number}"
-        self.control_topic = f"/devices/tlv493_{bus_number}/controls/field_strength"
+        self.control_topic = f"/devices/tlv493_{bus_number}/controls/field_strength_percent"
         self.mqtt_client = mqtt_client
         self.create()
 
@@ -181,18 +181,12 @@ class VirtualDevice:
 class TLV493Driver:
 
     def __init__(self, config_fname="/etc/wb-mqtt-tlv493.conf"):
-        ec = self.update_config(config_fname)
+        ec = self.validate_config(config_fname)
         if ec != EXIT_SUCCESS:
             sys.exit(ec)
 
         self.mqtt_client = MQTTClient(CONFIG["driver_name"])
         self.mqtt_client.start()
-
-        self.bus_num = CONFIG.get("bus_num", None)
-        if self.bus_num is None:
-            logging.warning("Bus number is not specified")
-            sys.exit(EXIT_NOTCONFIGURED)
-        self.bus = SMBus(self.bus_num)
 
         self.running = True
 
@@ -238,19 +232,28 @@ class TLV493Driver:
             self.mqtt_client.stop()
             sys.exit(ec)
 
-    @staticmethod
-    def update_config(config_fname):
+    def validate_config(self, config_fname):
         try:
             with open(config_fname, encoding="utf-8") as conffile:
                 config_dict = literal_eval(conffile.read())
                 CONFIG.update(config_dict)
-                return EXIT_SUCCESS
         except IOError:
             logging.info("No config file at %s found! Treating service as not running", config_fname)
             return EXIT_NOTRUNNING
         except (SyntaxError, ValueError):
             logging.exception("Error in config file %s", config_fname)
             return EXIT_NOTCONFIGURED
+
+        self.bus_num = CONFIG.get("bus_num", None)
+        if self.bus_num is None:
+            logging.warning("Bus number is not specified in %s", config_fname)
+            return EXIT_NOTCONFIGURED
+        try:
+            self.bus = SMBus(self.bus_num)
+        except OSError:
+            logging.exception("Possibly wrong i2c bus specified:")
+            return EXIT_NOTCONFIGURED
+        return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
