@@ -226,27 +226,36 @@ class TLV493Driver:
 
     def run(self):
         ec = EXIT_SUCCESS
-        try:
-            virtual_device = VirtualDevice(self.mqtt_client, self.bus_num)
-            addr = self.search_i2c_device()
-            sens = TLV493(self.bus, addr)
+        virtual_device = VirtualDevice(self.mqtt_client, self.bus_num)
+        logging.info("Initting device")
+        while self.running:
+            try:
+                addr = self.search_i2c_device()
+                sens = TLV493(self.bus, addr)
+            except Exception:
+                virtual_device.publish_error()
+                time.sleep(CONFIG["poll_interval_s"])
+                continue
+
             virtual_device.publish_error(None)
             logging.info("Start polling device via i2c w %.2fs period", CONFIG["poll_interval_s"])
+
             while self.running:
-                x, y, z = sens.magnetic
-                # cb8ea449 want just percents of magnetic field strength
-                result_ut = max(map(abs, [x, y, z]))
-                result = "%.2f" % (result_ut / self.MAX_MEASUREMENTS_BOUND_UT * 100.0)
-                virtual_device.publish_value(result)
+                try:
+                    x, y, z = sens.magnetic
+                    # cb8ea449 want just percents of magnetic field strength
+                    result_ut = max(map(abs, [x, y, z]))
+                    result = "%.2f" % (result_ut / self.MAX_MEASUREMENTS_BOUND_UT * 100.0)
+                    virtual_device.publish_value(result)
+                except Exception:
+                    logging.exception("Failed data read. Will reinit device")
+                    virtual_device.publish_error()
+                    break
                 time.sleep(CONFIG["poll_interval_s"])
-        except Exception:
-            logging.exception("Unhandled exception:")
-            ec = EXIT_FAILURE
-            virtual_device.publish_error()
-        finally:
-            virtual_device.delete()
-            self.mqtt_client.stop()
-            sys.exit(ec)
+
+        virtual_device.delete()
+        self.mqtt_client.stop()
+        sys.exit(ec)
 
     def validate_config(self, config_fname):
         try:
