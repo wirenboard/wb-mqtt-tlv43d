@@ -181,7 +181,7 @@ class VirtualDevice:
 class TLV493Driver:
     MAX_MEASUREMENTS_BOUND_UT = 130000  # datasheet says +- 130mT for tlv493
 
-    def __init__(self, config_fname="/etc/wb-mqtt-tlv493.conf"):
+    def __init__(self, config_fname):
         ec = self.validate_config(config_fname)
         if ec != EXIT_SUCCESS:
             sys.exit(ec)
@@ -261,4 +261,8 @@ class TLV493Driver:
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s %(message)s", level=logging.DEBUG)
 
-    TLV493Driver().run()
+    if len(sys.argv) != 2:
+        logging.warning("Usage: %s config_file", sys.argv[0])
+        sys.exit(EXIT_NOTCONFIGURED)
+
+    TLV493Driver(config_fname=sys.argv[1]).run()
