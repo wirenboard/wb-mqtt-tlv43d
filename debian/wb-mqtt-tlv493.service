@@ -1,6 +1,7 @@
 [Unit]
 Description=Userspace driver for tlv493 magnetic field sensor
-After=mosquitto.service
+Wants=wb-hwconf-manager.service wb-modules.service
+After=mosquitto.service wb-hwconf-manager.service wb-modules.service
 
 [Service]
 Type=simple
