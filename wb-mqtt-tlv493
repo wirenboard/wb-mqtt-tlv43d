@@ -192,12 +192,11 @@ class TLV493Driver:
             sys.exit(EXIT_NOTRUNNING)
 
         try:
-            self.validate_config(config_fname)
+            self.bus_num = self.get_valid_bus_number(config_fname)  # filled by wb-hwconf-manager
         except ConfigValidationError:
             logging.exception("Possibly wrong config file %s", config_fname)
             sys.exit(EXIT_NOTCONFIGURED)
 
-        self.bus_num = CONFIG["bus_num"]
         self.bus = SMBus(self.bus_num)
 
         self.mqtt_client = MQTTClient(CONFIG["driver_name"])
@@ -257,7 +256,7 @@ class TLV493Driver:
         self.mqtt_client.stop()
         sys.exit(ec)
 
-    def validate_config(self, config_fname):
+    def get_valid_bus_number(self, config_fname):
         try:
             with open(config_fname, encoding="utf-8") as conffile:
                 config_dict = literal_eval(conffile.read())
@@ -273,6 +272,7 @@ class TLV493Driver:
             SMBus(bus_num)
         except OSError:
             raise ConfigValidationError from e
+        return bus_num
 
 
 if __name__ == "__main__":
