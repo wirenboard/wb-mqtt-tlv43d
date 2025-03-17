@@ -270,7 +270,7 @@ class TLV493Driver:
 
         try:
             SMBus(bus_num)
-        except OSError:
+        except OSError as e:
             raise ConfigValidationError from e
         return bus_num
 
