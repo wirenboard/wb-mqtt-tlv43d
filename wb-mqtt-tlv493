@@ -156,6 +156,9 @@ class VirtualDevice:
 
     def __init__(self, mqtt_client, bus_number):
         self._was_disconnected = True
+        self._val = ""
+        self._err = "r"
+
         self.base_topic = f"/devices/tlv493_{bus_number}"
         self.control_topic = f"/devices/tlv493_{bus_number}/controls/field_strength_percent"
         self.mqtt_client = mqtt_client
@@ -166,6 +169,8 @@ class VirtualDevice:
         logging.info("Mosquitto was connected")
         if self._was_disconnected:
             self.create()
+            self.publish_value(self._val)
+            self.publish_error(self._err)
             self._was_disconnected = False
 
     def _on_disconnect(self, *args, **kwargs):
@@ -184,10 +189,12 @@ class VirtualDevice:
         self._publish_meta("", "")
 
     def publish_value(self, val):
+        self._val = val
         self.mqtt_client.publish(self.control_topic, str(val), retain=True)
 
     def publish_error(self, val="r"):
         val = "r" if val else ""
+        self._err = val
         self.mqtt_client.publish(f"{self.control_topic}/meta/error", val, retain=True)
 
 
@@ -239,7 +246,6 @@ class TLV493Driver:
         ec = EXIT_SUCCESS
         virtual_device = VirtualDevice(self.mqtt_client, self.bus_num)
         logging.info("Initting device")
-        virtual_device.publish_error()
         while self.running:
             try:
                 addr = self.search_i2c_device()
