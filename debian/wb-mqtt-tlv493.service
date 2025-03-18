@@ -1,0 +1,16 @@
+[Unit]
+Description=Userspace driver for tlv493 magnetic field sensor
+Wants=wb-hwconf-manager.service wb-modules.service
+After=mosquitto.service wb-hwconf-manager.service wb-modules.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=10
+User=root
+ExecStart=/usr/bin/wb-mqtt-tlv493 /var/lib/wb-mqtt-tlv493/conf.d/wb-mqtt-tlv493.conf
+RestartPreventExitStatus=2 3 4 5 6
+SuccessExitStatus=7
+
+[Install]
+WantedBy=multi-user.target

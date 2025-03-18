@@ -1,0 +1,7 @@
+wb-mqtt-tlv493 (1.0.0) stable; urgency=medium
+
+  * Initial release
+  * Investigations: Karim Khaitov (@Magistrdev)
+  * Integration: Vladimir Romanov (@vdromanov)
+
+ -- Vladimir Romanov <v.romanov@wirenboard.com>  Mon, 10 Mar 2025 18:45:21 +0300
