@@ -184,7 +184,6 @@ class VirtualDevice:
 
     def create(self):
         self._publish_meta(json.dumps(self.DEVICE_META), json.dumps(self.CONTROL_META))
-        self.publish_error(None)
 
     def delete(self):
         self._publish_meta("", "")
