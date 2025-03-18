@@ -148,15 +148,16 @@ class VirtualDevice:
         "type": "value",
         "order": 10,
         "readonly": True,
+        "units": "%",
         "title": {
-            "en": "Magnetic field strength %",
-            "ru": "Напряженность поля %",
+            "en": "Magnetic field strength",
+            "ru": "Напряженность поля",
         }
     }
 
     def __init__(self, mqtt_client, bus_number):
         self._was_disconnected = True
-        self._val = ""
+        self._val = "0"
         self._err = "r"
 
         self.base_topic = f"/devices/tlv493_{bus_number}"
