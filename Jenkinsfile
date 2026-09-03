@@ -1,4 +1,5 @@
 buildDebSbuild defaultTargets: 'bullseye-armhf',
                defaultRunLintian: true,
-               defaultRunPythonChecks: false,
+               defaultRunPythonChecks: true,
+               defaultAngryPylint: true,
                defaultRunCoverage: false
