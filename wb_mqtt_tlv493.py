@@ -12,7 +12,7 @@ import threading
 from ast import literal_eval
 from typing import Tuple
 
-from smbus import SMBus
+from smbus import SMBus  # pylint: disable=no-name-in-module
 from wb_common.mqtt_client import MQTTClient
 
 CONFIG = {"poll_interval_s": 0.5, "driver_name": "wb-mqtt-tlv493"}
