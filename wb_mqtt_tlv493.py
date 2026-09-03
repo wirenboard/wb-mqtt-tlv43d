@@ -246,7 +246,7 @@ class TLV493Driver:
             logging.error("Invalid config file %s: %s", config_fname, error)
             sys.exit(EXIT_NOTCONFIGURED)
 
-        self.bus = SMBus(self.bus_num)
+        self.bus = None
 
         self.stop_event = threading.Event()
         self.exit_code = EXIT_NOTRUNNING
@@ -267,6 +267,15 @@ class TLV493Driver:
         self.exit_code = EXIT_INVALIDARGUMENT
         self.stop_event.set()
 
+    def _close_bus(self):
+        if self.bus is None:
+            return
+        try:
+            self.bus.close()
+        except OSError:
+            logging.exception("Failed to close I2C bus %s", self.bus_num)
+        self.bus = None
+
     def search_i2c_device(self):
         """
         TLV493 has different i2c addr, depending on SDA voltage => we have only 1 device on bus
@@ -285,9 +294,12 @@ class TLV493Driver:
         logging.info("Initting device")
         while not self.stop_event.is_set():
             try:
+                if self.bus is None:
+                    self.bus = SMBus(self.bus_num)
                 addr = self.search_i2c_device()
                 sens = TLV493(self.bus, addr)
             except (OSError, RuntimeError):
+                self._close_bus()
                 virtual_device.publish_error()
                 self.stop_event.wait(CONFIG["poll_interval_s"])
                 continue
@@ -304,10 +316,12 @@ class TLV493Driver:
                     virtual_device.publish_value(result)
                 except OSError:
                     logging.exception("Failed data read. Will reinit device")
+                    self._close_bus()
                     virtual_device.publish_error()
                     break
                 self.stop_event.wait(CONFIG["poll_interval_s"])
 
+        self._close_bus()
         if self.exit_code == EXIT_INVALIDARGUMENT:
             self.mqtt_client.stop()
             return self.exit_code
@@ -341,10 +355,6 @@ class TLV493Driver:
         ):
             raise ConfigValidationError("Poll interval must be a positive number")
 
-        try:
-            SMBus(bus_num)
-        except (OSError, TypeError) as error:
-            raise ConfigValidationError(str(error)) from error
         return bus_num
 
 
