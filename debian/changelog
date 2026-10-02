@@ -5,6 +5,7 @@ wb-mqtt-tlv493 (1.1.0) stable; urgency=medium
   * Publish and log the sensor error only when its state changes; republish the state on every connect
   * Remove all four retained topics on SIGINT/SIGTERM, report when the broker is not connected
   * Require python3-wb-common >= 2.4.0 for the retry-forever MQTT client
+  * Build for the default Jenkins targets instead of bullseye-armhf only; debhelper compat 13 via debhelper-compat
 
  -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Thu, 17 Sep 2026 15:46:26 +0000
 
