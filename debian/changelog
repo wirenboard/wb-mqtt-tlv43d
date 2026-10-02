@@ -1,3 +1,14 @@
+wb-mqtt-tlv493 (1.1.0) stable; urgency=medium
+
+  * Exit with 2 instead of 6 when the config path argument is missing or an unknown argument is given
+  * Wait for an unavailable MQTT broker and for the I2C bus instead of exiting, exit 2 on a rejected login
+  * Publish and log the sensor error only when its state changes; republish the state on every connect
+  * Remove all four retained topics on SIGINT/SIGTERM, report when the broker is not connected
+  * Require python3-wb-common >= 2.4.0 for the retry-forever MQTT client
+  * Build for the default Jenkins targets instead of bullseye-armhf only; debhelper compat 13 via debhelper-compat
+
+ -- Ekaterina Volkova <ekaterina.volkova@wirenboard.com>  Thu, 17 Sep 2026 15:46:26 +0000
+
 wb-mqtt-tlv493 (1.0.1) stable; urgency=medium
 
   * Fix lintian
